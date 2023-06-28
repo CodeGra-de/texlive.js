@@ -1,4 +1,6 @@
-var PDFTeX = function(opt_workerPath) {
+var Worker = require('web-worker');
+
+export default function(opt_workerPath) {
   if (!opt_workerPath) {
     opt_workerPath = 'pdftex-worker.js';
   }
@@ -23,7 +25,7 @@ var PDFTeX = function(opt_workerPath) {
       console.log("missing command!", data);
     switch(data['command']) {
       case 'ready':
-        onready.done(true);
+        ready(true);
         break;
       case 'stdout':
       case 'stderr':
@@ -33,20 +35,24 @@ var PDFTeX = function(opt_workerPath) {
         //console.debug('< received', data);
         msg_id = data['msg_id'];
         if(('msg_id' in data) && (msg_id in promises)) {
-          promises[msg_id].done(data['result']);
+          promises[msg_id](data['result']);
         }
         else
           console.warn('Unknown worker message '+msg_id+'!');
     }
   }
 
-  var onready = new promise.Promise();
+    let ready
+    let onready = new Promise((resolve ) => { ready = resolve})
   var promises = [];
   var chunkSize = undefined;
 
   var sendCommand = function(cmd) {
-    var p = new promise.Promise();
-    var msg_id = promises.push(p)-1;
+      let promiseDone;
+      const p = new Promise(resolve => {
+          promiseDone = resolve
+      });
+      var msg_id = promises.push(promiseDone)-1;
 
     onready.then(function() {
       cmd['msg_id'] = msg_id;
@@ -59,7 +65,7 @@ var PDFTeX = function(opt_workerPath) {
 
   var determineChunkSize = function() {
     var size = 1024;
-    var max = undefined; 
+    var max = undefined;
     var min = undefined;
     var delta = size;
     var success = true;
@@ -138,7 +144,7 @@ var PDFTeX = function(opt_workerPath) {
     return p;
   }
 
-  self.compileRaw = function(source_code) {
+  self.compileRaw = async function(source_code) {
     if(typeof(chunkSize) === "undefined")
       chunkSize = determineChunkSize();
 
@@ -167,8 +173,9 @@ var PDFTeX = function(opt_workerPath) {
       return self.FS_readFile('/input.pdf');
     }
 
-    return promise.chain(commands)
-      .then(sendCompile)
-      .then(getPDF);
+      for (const command of commands) {
+          await command()
+      }
+      return sendCompile().then(getPDF);
   };
 };
